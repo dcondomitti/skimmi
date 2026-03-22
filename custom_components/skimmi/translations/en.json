@@ -2,7 +2,8 @@
     "config": {
         "abort": {
             "already_configured": "Device is already configured",
-            "no_devices_found": "No devices found on the network"
+            "no_devices_found": "No devices found on the network",
+            "reauth_successful": "Re-authentication was successful"
         },
         "error": {
             "cannot_connect": "Failed to connect",
@@ -17,6 +18,15 @@
                     "password": "Leave blank if your device does not have a password set."
                 },
                 "description": "Do you want to set up {name}?"
+            },
+            "reauth_confirm": {
+                "data": {
+                    "password": "Password"
+                },
+                "data_description": {
+                    "password": "Enter the password configured on your Skimmi device."
+                },
+                "description": "The device requires authentication. Please enter the password."
             },
             "user": {
                 "data": {

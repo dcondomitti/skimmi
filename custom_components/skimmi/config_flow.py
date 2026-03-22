@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 from bleak import BleakClient
@@ -14,7 +15,7 @@ from homeassistant.components.bluetooth import (
     BluetoothServiceInfoBleak,
     async_discovered_service_info,
 )
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_ADDRESS, CONF_PASSWORD
 from homeassistant.exceptions import HomeAssistantError
 
@@ -47,6 +48,7 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
     MINOR_VERSION = 1
 
     _discovery_info: BluetoothServiceInfoBleak | None = None
+    _reauth_entry: ConfigEntry | None = None
 
     async def async_step_bluetooth(
         self, discovery_info: BluetoothServiceInfoBleak
@@ -156,6 +158,39 @@ class ConfigFlow(ConfigFlow, domain=DOMAIN):
                 }
             ),
             errors=errors,
+        )
+
+    async def async_step_reauth(
+        self, entry_data: Mapping[str, Any]
+    ) -> ConfigFlowResult:
+        """Handle reauthentication when the device requires a password."""
+        self._reauth_entry = self.hass.config_entries.async_get_entry(
+            self.context["entry_id"]
+        )
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema(
+                {vol.Required(CONF_PASSWORD): str}
+            ),
+        )
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle reauthentication confirmation."""
+        assert self._reauth_entry is not None
+
+        if user_input is not None:
+            return self.async_update_reload_and_abort(
+                self._reauth_entry,
+                data_updates={CONF_PASSWORD: user_input[CONF_PASSWORD]},
+            )
+
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema(
+                {vol.Required(CONF_PASSWORD): str}
+            ),
         )
 
     def _find_discovery(

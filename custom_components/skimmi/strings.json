@@ -10,6 +10,15 @@
           "password": "Leave blank if your device does not have a password set."
         }
       },
+      "reauth_confirm": {
+        "description": "The device requires authentication. Please enter the password.",
+        "data": {
+          "password": "[%key:common::config_flow::data::password%]"
+        },
+        "data_description": {
+          "password": "Enter the password configured on your Skimmi device."
+        }
+      },
       "user": {
         "data": {
           "address": "Device",
@@ -27,7 +36,8 @@
     },
     "abort": {
       "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
-      "no_devices_found": "[%key:common::config_flow::abort::no_devices_found%]"
+      "no_devices_found": "[%key:common::config_flow::abort::no_devices_found%]",
+      "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]"
     }
   },
   "entity": {

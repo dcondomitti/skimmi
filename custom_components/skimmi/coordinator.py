@@ -16,6 +16,7 @@ from homeassistant.components import bluetooth
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_ADDRESS, CONF_PASSWORD
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
@@ -264,17 +265,14 @@ class SkimmiCoordinator(DataUpdateCoordinator[SkimmiData]):
 
             auth_data = await client.read_gatt_char(UUID_AUTH_READ)
             if auth_data[3] != 2:
-                _LOGGER.warning(
-                    "Authentication failed for %s (status=%d after response)",
-                    self.address,
-                    auth_data[3],
+                raise ConfigEntryAuthFailed(
+                    f"Authentication failed for {self.address} "
+                    f"(status={auth_data[3]} after response, password may be incorrect)"
                 )
-            else:
-                _LOGGER.debug("Authentication successful for %s", self.address)
+            _LOGGER.debug("Authentication successful for %s", self.address)
         elif status in (1, 4) and not self.password:
-            _LOGGER.warning(
-                "Device %s requires authentication but no password configured",
-                self.address,
+            raise ConfigEntryAuthFailed(
+                f"Device {self.address} requires authentication but no password is configured"
             )
 
     async def _read_device_info(self, client: BleakClient) -> None:
