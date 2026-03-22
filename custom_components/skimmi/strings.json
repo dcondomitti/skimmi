@@ -11,12 +11,12 @@
         }
       },
       "reauth_confirm": {
-        "description": "The device requires authentication. Please enter the password.",
+        "description": "The device requires authentication. Enter the password, or leave blank if your device was auto-paired.",
         "data": {
           "password": "[%key:common::config_flow::data::password%]"
         },
         "data_description": {
-          "password": "Enter the password configured on your Skimmi device."
+          "password": "Leave blank if your device was paired automatically through the app."
         }
       },
       "user": {
