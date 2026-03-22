@@ -1,0 +1,52 @@
+{
+  "config": {
+    "step": {
+      "bluetooth_confirm": {
+        "description": "Do you want to set up {name}?",
+        "data": {
+          "password": "[%key:common::config_flow::data::password%]"
+        },
+        "data_description": {
+          "password": "Leave blank if your device does not have a password set."
+        }
+      },
+      "user": {
+        "data": {
+          "address": "Device",
+          "password": "[%key:common::config_flow::data::password%]"
+        },
+        "data_description": {
+          "address": "Select the Skimmi device to set up.",
+          "password": "Leave blank if your device does not have a password set."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
+      "unknown": "[%key:common::config_flow::error::unknown%]"
+    },
+    "abort": {
+      "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
+      "no_devices_found": "[%key:common::config_flow::abort::no_devices_found%]"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "device_state": {
+        "name": "State",
+        "state": {
+          "idle": "Idle",
+          "cleaning": "Cleaning",
+          "paused": "Paused",
+          "error": "[%key:common::state::error%]"
+        }
+      },
+      "motor_hours": {
+        "name": "Motor hours"
+      },
+      "cycle_time": {
+        "name": "Cycle time"
+      }
+    }
+  }
+}

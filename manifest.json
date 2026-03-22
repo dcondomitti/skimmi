@@ -1,0 +1,16 @@
+{
+  "domain": "skimmi",
+  "name": "Maytronics Skimmi",
+  "bluetooth": [
+    { "local_name": "SKIMMI*" },
+    { "local_name": "SKIMLUX*" }
+  ],
+  "codeowners": ["@dcondomitti"],
+  "config_flow": true,
+  "dependencies": ["bluetooth_adapters"],
+  "documentation": "https://www.home-assistant.io/integrations/skimmi",
+  "integration_type": "device",
+  "iot_class": "local_polling",
+  "quality_scale": "bronze",
+  "requirements": []
+}
