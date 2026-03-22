@@ -245,18 +245,18 @@ class SkimmiCoordinator(DataUpdateCoordinator[SkimmiData]):
             "Auth version=%d, status=%d for %s", version, status, self.address
         )
 
-        if version >= 2 and status == 1:
-            _LOGGER.debug("Auto-pair device (version %d), no auth needed", version)
-            return
-
         if status == 2:
             _LOGGER.debug("Device already authenticated")
             return
 
-        if status in (1, 4) and self.password:
+        if status in (1, 4):
+            # When no password is configured, use "null" to match the MyDolphin+
+            # app's auto-pair behavior: Java's (null + null).toUpperCase() = "NULLNULL"
+            # which is equivalent to password "null" doubled and uppercased.
+            password = self.password or "null"
             challenge = bytes(auth_data[4:12])
             _LOGGER.debug("Auth challenge: %s", challenge.hex())
-            auth_response = compute_auth_response(challenge, self.password)
+            auth_response = compute_auth_response(challenge, password)
             _LOGGER.debug("Sending auth response to %s", self.address)
             await client.write_gatt_char(
                 UUID_AUTH_WRITE, auth_response, response=False
@@ -270,10 +270,6 @@ class SkimmiCoordinator(DataUpdateCoordinator[SkimmiData]):
                     f"(status={auth_data[3]} after response, password may be incorrect)"
                 )
             _LOGGER.debug("Authentication successful for %s", self.address)
-        elif status in (1, 4) and not self.password:
-            raise ConfigEntryAuthFailed(
-                f"Device {self.address} requires authentication but no password is configured"
-            )
 
     async def _read_device_info(self, client: BleakClient) -> None:
         """Read static device information characteristics."""
