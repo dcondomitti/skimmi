@@ -164,6 +164,7 @@ class SkimmiCoordinator(DataUpdateCoordinator[SkimmiData]):
 
     async def _async_update_data(self) -> SkimmiData:
         """Poll the device via BLE and return parsed data."""
+        _LOGGER.debug("Starting update for %s", self.address)
         ble_device = bluetooth.async_ble_device_from_address(
             self.hass, self.address, connectable=True
         )
@@ -172,25 +173,41 @@ class SkimmiCoordinator(DataUpdateCoordinator[SkimmiData]):
                 f"Could not find Skimmi device with address {self.address}"
             )
 
+        _LOGGER.debug("Found BLE device %s, establishing connection", self.address)
         try:
             client = await establish_connection(
                 BleakClient, ble_device, self.address
             )
         except (BleakError, TimeoutError) as err:
-            raise UpdateFailed(f"Failed to connect: {err}") from err
+            raise UpdateFailed(f"Failed to connect to {self.address}: {err}") from err
 
+        _LOGGER.debug("Connected to %s, starting communication", self.address)
         try:
+            _LOGGER.debug("Authenticating with %s", self.address)
             await self._authenticate(client)
 
             if self.device_info.serial_number is None:
+                _LOGGER.debug("Reading device info from %s", self.address)
                 await self._read_device_info(client)
 
+            _LOGGER.debug("Reading status from %s", self.address)
             status = await self._read_status(client)
         except (BleakError, TimeoutError) as err:
-            raise UpdateFailed(f"Communication error: {err}") from err
+            raise UpdateFailed(
+                f"Communication error with {self.address} during BLE operation: {err}"
+            ) from err
         finally:
+            _LOGGER.debug("Disconnecting from %s", self.address)
             await client.disconnect()
 
+        _LOGGER.debug(
+            "Update complete for %s: state=%s, battery=%s%%, temp=%s°C, power=%sW",
+            self.address,
+            status.device_state,
+            status.battery_level,
+            status.temperature,
+            status.power,
+        )
         return SkimmiData(status=status, device_info=self.device_info)
 
     async def _authenticate(self, client: BleakClient) -> None:
@@ -202,15 +219,30 @@ class SkimmiCoordinator(DataUpdateCoordinator[SkimmiData]):
         """
         try:
             auth_data = await client.read_gatt_char(UUID_AUTH_READ)
-        except BleakError:
-            _LOGGER.debug("No auth characteristic found, skipping authentication")
+        except BleakError as err:
+            _LOGGER.debug(
+                "No auth characteristic found on %s, skipping authentication: %s",
+                self.address,
+                err,
+            )
             return
 
+        _LOGGER.debug(
+            "Auth data from %s: %s (len=%d)",
+            self.address,
+            auth_data.hex(),
+            len(auth_data),
+        )
+
         if len(auth_data) < 12:
+            _LOGGER.debug("Auth data too short (%d bytes), skipping", len(auth_data))
             return
 
         version = auth_data[1]
         status = auth_data[3]
+        _LOGGER.debug(
+            "Auth version=%d, status=%d for %s", version, status, self.address
+        )
 
         if version >= 2 and status == 1:
             _LOGGER.debug("Auto-pair device (version %d), no auth needed", version)
@@ -222,7 +254,9 @@ class SkimmiCoordinator(DataUpdateCoordinator[SkimmiData]):
 
         if status in (1, 4) and self.password:
             challenge = bytes(auth_data[4:12])
+            _LOGGER.debug("Auth challenge: %s", challenge.hex())
             auth_response = compute_auth_response(challenge, self.password)
+            _LOGGER.debug("Sending auth response to %s", self.address)
             await client.write_gatt_char(
                 UUID_AUTH_WRITE, auth_response, response=False
             )
@@ -230,7 +264,18 @@ class SkimmiCoordinator(DataUpdateCoordinator[SkimmiData]):
 
             auth_data = await client.read_gatt_char(UUID_AUTH_READ)
             if auth_data[3] != 2:
-                _LOGGER.warning("Authentication failed for device %s", self.address)
+                _LOGGER.warning(
+                    "Authentication failed for %s (status=%d after response)",
+                    self.address,
+                    auth_data[3],
+                )
+            else:
+                _LOGGER.debug("Authentication successful for %s", self.address)
+        elif status in (1, 4) and not self.password:
+            _LOGGER.warning(
+                "Device %s requires authentication but no password configured",
+                self.address,
+            )
 
     async def _read_device_info(self, client: BleakClient) -> None:
         """Read static device information characteristics."""
@@ -242,13 +287,15 @@ class SkimmiCoordinator(DataUpdateCoordinator[SkimmiData]):
         ):
             try:
                 data = await client.read_gatt_char(uuid)
-                setattr(
-                    self.device_info,
-                    attr,
-                    data.decode("utf-8", errors="replace").strip("\x00"),
+                value = data.decode("utf-8", errors="replace").strip("\x00")
+                setattr(self.device_info, attr, value)
+                _LOGGER.debug(
+                    "Device info %s=%s for %s", attr, value, self.address
                 )
-            except BleakError:
-                _LOGGER.debug("Could not read %s", attr)
+            except BleakError as err:
+                _LOGGER.debug(
+                    "Could not read %s from %s: %s", attr, self.address, err
+                )
 
     async def _read_status(self, client: BleakClient) -> SkimmiStatus:
         """Read device status by subscribing to notifications and sending idle command."""
@@ -256,20 +303,56 @@ class SkimmiCoordinator(DataUpdateCoordinator[SkimmiData]):
         status_data = bytearray()
 
         def _notification_handler(_sender: object, data: bytearray) -> None:
+            _LOGGER.debug(
+                "Status notification from %s: %s (%d bytes)",
+                self.address,
+                data.hex(),
+                len(data),
+            )
             status_data.extend(data)
             status_event.set()
 
+        _LOGGER.debug(
+            "Subscribing to status notifications on %s (UUID: %s)",
+            self.address,
+            UUID_STATUS_NOTIFY,
+        )
         await client.start_notify(UUID_STATUS_NOTIFY, _notification_handler)
         try:
+            _LOGGER.debug(
+                "Sending idle command to %s (UUID: %s)",
+                self.address,
+                UUID_CONTROL_WRITE,
+            )
             await client.write_gatt_char(
                 UUID_CONTROL_WRITE, IDLE_COMMAND, response=False
             )
+            _LOGGER.debug(
+                "Waiting for status notification from %s (timeout=%ss)",
+                self.address,
+                STATUS_TIMEOUT,
+            )
             async with asyncio.timeout(STATUS_TIMEOUT):
                 await status_event.wait()
+        except TimeoutError:
+            _LOGGER.debug(
+                "Timed out waiting for status notification from %s after %ss",
+                self.address,
+                STATUS_TIMEOUT,
+            )
+            raise
         finally:
             try:
                 await client.stop_notify(UUID_STATUS_NOTIFY)
-            except BleakError:
-                pass
+            except BleakError as err:
+                _LOGGER.debug(
+                    "Error stopping notifications on %s: %s", self.address, err
+                )
 
+        _LOGGER.debug(
+            "Raw status data from %s: %s (%d bytes)",
+            self.address,
+            status_data.hex(),
+            len(status_data),
+        )
         return parse_status(bytes(status_data))
