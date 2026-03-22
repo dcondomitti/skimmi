@@ -71,9 +71,43 @@ class SkimmiData:
     device_info: SkimmiDeviceInfo = field(default_factory=SkimmiDeviceInfo)
 
 
+def derive_password(t0: bytes, s0: bytes) -> str:
+    """Derive auto-pair password from challenge bytes.
+
+    Matches the g4 method from the MyDolphin+ APK. When a device is in
+    auto-pair mode (status 4), the app derives the password from two
+    challenge values: t0 (from a prior status-1 read) and s0 (from the
+    status-4 read). For a fresh device, both are the same challenge.
+
+    Args:
+        t0: Challenge bytes from the initial auth read (8 bytes).
+        s0: Challenge bytes from the current auth read (8 bytes).
+    """
+    # Reverse s0 in place (g4 swaps bArr2 using this.s0 which is the same ref)
+    s = bytearray(s0)
+    i, j = 0, len(s) - 1
+    while i <= j:
+        s[i], s[j] = s[j], s[i]
+        i += 1
+        j -= 1
+
+    p = bytearray(8)
+    p[0] = (s[0] ^ t0[5]) & 0xFF
+    bz5 = ((s[1] + 10) & 0xFF) ^ t0[1]
+    p[1] = (bz5 - s[0]) & 0xFF
+    p[3] = (s[0] - (((s[2] + 5) & 0xFF) ^ t0[3])) & 0xFF
+    p[5] = ((((s[3] + 2) & 0xFF) ^ t0[2]) - s[2]) & 0xFF
+    p[2] = ((((s[4] - 9) & 0xFF) ^ t0[0]) - s[1]) & 0xFF
+    p[4] = (s[4] - (((s[5] - 11) & 0xFF) ^ t0[4])) & 0xFF
+    p[7] = (s[3] - (((s[6] + 6) & 0xFF) ^ t0[7])) & 0xFF
+    p[6] = ((((s[7] - 16) & 0xFF) ^ t0[6]) - s[6]) & 0xFF
+
+    return "".join(chr(b) for b in p)
+
+
 def compute_auth_response(challenge: bytes, password: str) -> bytes:
     """Compute BLE authentication response using XOR-based challenge-response."""
-    pwd = (password + password).upper().encode("ascii")
+    pwd = (password + password).upper().encode("latin-1")
     response = bytearray(12)
     response[0] = 10
     response[1] = 1
@@ -249,27 +283,41 @@ class SkimmiCoordinator(DataUpdateCoordinator[SkimmiData]):
             _LOGGER.debug("Device already authenticated")
             return
 
-        if status in (1, 4):
-            # When no password is configured, use "null" to match the MyDolphin+
-            # app's auto-pair behavior: Java's (null + null).toUpperCase() = "NULLNULL"
-            # which is equivalent to password "null" doubled and uppercased.
-            password = self.password or "null"
-            challenge = bytes(auth_data[4:12])
-            _LOGGER.debug("Auth challenge: %s", challenge.hex())
-            auth_response = compute_auth_response(challenge, password)
-            _LOGGER.debug("Sending auth response to %s", self.address)
-            await client.write_gatt_char(
-                UUID_AUTH_WRITE, auth_response, response=False
-            )
-            await asyncio.sleep(0.5)
+        challenge = bytes(auth_data[4:12])
+        _LOGGER.debug("Auth challenge: %s", challenge.hex())
 
-            auth_data = await client.read_gatt_char(UUID_AUTH_READ)
-            if auth_data[3] != 2:
-                raise ConfigEntryAuthFailed(
-                    f"Authentication failed for {self.address} "
-                    f"(status={auth_data[3]} after response, password may be incorrect)"
-                )
-            _LOGGER.debug("Authentication successful for %s", self.address)
+        if status == 4:
+            # Auto-pair mode: derive password from challenge bytes (matches
+            # the g4 method in the MyDolphin+ APK)
+            password = derive_password(challenge, challenge)
+            _LOGGER.debug(
+                "Auto-pair: derived password for %s: %r", self.address, password
+            )
+        elif self.password:
+            password = self.password
+        else:
+            # No password configured and device needs auth — try Java null
+            # behavior: (null + null).toUpperCase() = "NULLNULL"
+            password = "null"
+            _LOGGER.debug(
+                "No password configured for %s, trying default 'null'",
+                self.address,
+            )
+
+        auth_response = compute_auth_response(challenge, password)
+        _LOGGER.debug("Sending auth response to %s", self.address)
+        await client.write_gatt_char(
+            UUID_AUTH_WRITE, auth_response, response=False
+        )
+        await asyncio.sleep(0.5)
+
+        auth_data = await client.read_gatt_char(UUID_AUTH_READ)
+        if auth_data[3] != 2:
+            raise ConfigEntryAuthFailed(
+                f"Authentication failed for {self.address} "
+                f"(status={auth_data[3]} after response, password may be incorrect)"
+            )
+        _LOGGER.debug("Authentication successful for %s", self.address)
 
     async def _read_device_info(self, client: BleakClient) -> None:
         """Read static device information characteristics."""
