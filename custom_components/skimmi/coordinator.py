@@ -307,9 +307,9 @@ class SkimmiCoordinator(DataUpdateCoordinator[SkimmiData]):
         auth_response = compute_auth_response(challenge, password)
         _LOGGER.debug("Sending auth response to %s", self.address)
         await client.write_gatt_char(
-            UUID_AUTH_WRITE, auth_response, response=False
+            UUID_AUTH_WRITE, auth_response, response=True
         )
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(2.0)
 
         auth_data = await client.read_gatt_char(UUID_AUTH_READ)
         if auth_data[3] != 2:
